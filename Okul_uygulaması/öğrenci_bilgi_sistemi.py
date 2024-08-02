@@ -63,7 +63,8 @@ def createTable():
            doğum_tarihi DATE NOT NULL,
            cinsiyet VARCHAR(100) NOT NULL,
            telefon INTEGER  NOT NULL,
-           sınıf_id INTEGER 
+           sınıf_id INTEGER ,
+           FOREIGN KEY (sınıf_id) REFERENCES sınıf(id)
            );
         '''  
         create_branş_table='''
@@ -97,11 +98,30 @@ def createTable():
         
         
         ''' 
+        create_hobi_table='''
+        CREATE TABLE IF NOT EXISTS hobi(
+            id SERIAL PRIMARY KEY,
+            isim VARCHAR(100) NOT NULL 
+            
+        );
+        '''
+        create_öğrenci_hobi_table='''
+        CREATE TABLE IF NOT EXISTS öğrenci_hobi(
+            öğrenci_id INT NOT NULL,
+            hobi_id INT NOT NULL,
+            PRIMARY KEY(öğrenci_id,hobi_id),
+            FOREIGN KEY (öğrenci_id) REFERENCES öğrenci(id),
+            FOREIGN KEY (hobi_id) REFERENCES hobi(id)
+            
+        );
+        '''
         cursor.execute(create_öğrenci_table) 
         cursor.execute(create_branş_table,)
         cursor.execute(create_öğretmen_table)
         cursor.execute(create_sınıf_table)
-        print('Tablolar başarıyla oluşturuldu.')
+        cursor.execute(create_hobi_table)
+        cursor.execute(create_öğrenci_hobi_table)
+        
         
         
         print('Tablolar başarıyla oluşturuldu ve sütun eklendi.')
@@ -142,6 +162,12 @@ def insertTable(table,values):
             VALUES(%s,%s);
             
             '''  
+        elif table=='hobi':
+            insert_query='''INSERT INTO hobi(isim)
+            VALUES(%s);'''
+        elif table=='öğrenci_hobi':
+            insert_query='''INSERT INTO öğrenci_hobi(öğrenci_id,hobi_id)
+            VALUES(%s,%s);'''        
         cursor.execute(insert_query,values)
         print('Kayıt tabloya başarıyla eklenmiştir.')          
                   
@@ -213,6 +239,7 @@ def updateTable(table,set_values,condition) :
             connection.close()
             print('PostgreSQL veri tabanı kapatılmıştır.')
 def deleteTable(table,id):
+    
     try:
         connection=psy.connect(
           dbname='öğrenci',
@@ -240,7 +267,44 @@ def deleteTable(table,id):
             cursor.close()
             connection.close()
             print('PostgreSQL veri tabanı kapatılmıştır.')
+def add_hobbies_to_student():
+    try:
+        connection=psy.connect(
+            dbname='öğrenci',
+            user=user,
+            password=password,
+            host=host,
+            port=port
+        )
+        
+        connection.set_isolation_level(extensions.ISOLATION_LEVEL_AUTOCOMMIT) 
+        cursor=connection.cursor()
+        öğrenci_id=input('ÖĞRENCİ ID: ')
+        hobiler=input("Hobi ID'leri: ").split(',')
+        for hobi_id in hobiler:
+            hobi_id=hobi_id.strip()
+            insert_query='''INSERT INTO öğrenci_hobi(öğrenci_id,hobi_id)
+            VALUES(%s,%s) ON CONFLICT ("öğrenci_id", hobi_id) DO NOTHING;'''
+            cursor.execute(insert_query,(öğrenci_id,hobi_id.strip()))
+            print(f'Öğrenci {öğrenci_id} için hobi {hobi_id} başarıyla eklendi veya zaten mevcuttu.')
+        count_query = '''SELECT COUNT(*) FROM öğrenci_hobi WHERE öğrenci_id = %s'''
 
+
+        cursor.execute(count_query, (öğrenci_id,))
+
+
+        result = cursor.fetchone()
+        if result:
+            hobi_sayısı=result[0]
+            print(f"{öğrenci_id} ID'li öğrencinin {hobi_sayısı} hobisi var.")
+    
+    except(Exception, psy.Error) as error:
+        print(f'veritabanı oluşturulurken hata oluştu: {error}')
+    finally:   
+        if connection:
+            cursor.close()
+            connection.close()
+            print('PostgreSQL veri tabanı kapatılmıştır.')    
                 
 def menu():
     print('Hoşgeldiniz, seçiminizi yapınız:')
@@ -248,8 +312,10 @@ def menu():
     print('2 - Kayıt güncelleme')
     print('3 - Kayıt silme')
     print('4 - Kayıtları listeleme')
-    print('5 - sınıf bilgisi ve doğum tarihi alınarak 2000 yılından önce ve sonra doğanlar')  
-    print('6 - İsmi girilen öğrencinin hangi katta olduğu ')  
+    print('5 - sınıf bilgisi ve doğum tarihi alınarak belirtilen tarihten  önce ve sonra doğanlar')  
+    print('6 - İsmi girilen öğrencinin hangi katta olduğu ') 
+    print('7 - Yeni hobi ekle: ') 
+    print('8 - Öğrenciye yeni hobi ekle: ')
 def insert_case():
     
     print('Öğrenci için: ')
@@ -291,6 +357,13 @@ def insert_case():
     else:
         kat=input('KAT: ')
         insertTable('sınıf',(isim,kat))
+    print('Hobi için: ')
+    print('Eklemek istemiyorsanız q tuşuna basın.')
+    isim = input('ISIM: ')
+    if isim == 'q':
+        pass
+    else:
+        insertTable('hobiler', (isim,))    
 def update_case():
     
     print('Öğrenci için: ')
@@ -385,38 +458,35 @@ def filter_by_class_and_birth():
         connection.set_isolation_level(extensions.ISOLATION_LEVEL_AUTOCOMMIT) 
         cursor=connection.cursor()
         sınıf=input('Sınıf bilgisini giriniz: ')
-        query_sınıf_id='''SELECT id FROM sınıf WHERE name=%s;'''
-        cursor.execute(query_sınıf_id,(sınıf,))
-        sınıf_id=cursor.fetchone()
-        if sınıf_id:
-            sınıf_id = sınıf_id[0]
-        else:
-            print(f"{sınıf} isimli sınıf veritabanında bulunamadı.")
-            return
+        doğum_yılı=input('Doğum yılını giriniz:')
+        query_sınıf_birth='''SELECT öğrenci.isim, öğrenci.soysisim, öğrenci.doğum_tarihi
+            FROM öğrenci 
+            JOIN sınıf  ON öğrenci.sınıf_id = sınıf.id
+            WHERE sınıf.name = %s;'''
         
-        query_student='''SELECT isim,soysisim,doğum_tarihi FROM öğrenci
-        WHERE sınıf_id=%s
-        '''
-        cursor.execute(query_student,(sınıf_id,))
-        
+        cursor.execute(query_sınıf_birth,(sınıf,))
         records=cursor.fetchall()
-        before_2000=[]
-        after_2000=[]
+        if not records :
+            print(f'{sınıf} isimli sınıf veritabanında bulunamadı.')
+            return
+        before_doğum_yılı=[]
+        after_doğum_yılı=[]
+        doğum_yılı_datetime=datetime.strptime(doğum_yılı,'%Y').date()
         for record in records:
             doğum_tarihi=record[2]
             
-            if doğum_tarihi<datetime(2000,1,1).date():
-                before_2000.append(record)
+            if doğum_tarihi<doğum_yılı_datetime:
+                before_doğum_yılı.append(record)
             else:
-                after_2000.append(record)
+                after_doğum_yılı.append(record)
         print(f'{sınıf} sınıfındaki öğrenciler ve doğum tarihleri:')
         for record in records:
             print(record)        
-        print('2000 yılıdan önce doğanlar')
-        for record in before_2000:
-            print(record)   
-        print('2000 yılıdan sonra doğanlar') 
-        for record in after_2000:
+        print(f'{doğum_yılı} yılından önce doğanlar')
+        for record in before_doğum_yılı:
+            print(record)       
+        print(f'{doğum_yılı} yılından sonra doğanlar') 
+        for record in after_doğum_yılı:
             print(record)            
     except(Exception,psy.Error) as error:
         print(f'veritabanı oluşturulurken hata oluştu: {error}')
@@ -437,25 +507,19 @@ def find_student_floor():
         connection.set_isolation_level(extensions.ISOLATION_LEVEL_AUTOCOMMIT) 
         cursor=connection.cursor()
         isim=input('Öğrencinin ismini giriniz: ').strip().lower()
-        query_sınıf_id='''SELECT sınıf_id FROM öğrenci WHERE isim=%s
+        query='''SELECT sınıf.kat FROM sınıf join öğrenci on sınıf_id=öğrenci.sınıf_id  WHERE  öğrenci.isim=%s
         '''
-        cursor.execute(query_sınıf_id,(isim,))
+        cursor.execute(query,(isim,))
         
-        sınıf_id=cursor.fetchone()
-        if sınıf_id:
-            sınıf_id=sınıf_id[0]
+        kat=cursor.fetchone()
+        if kat:
+            print(f"{isim} isimli öğrenci {kat[0]}. katta.")
+            
         else:
             print(f"{isim} isimli öğrenci veritabanında bulunamadı.")
             return    
-        query_kat='''SELECT kat FROM sınıf WHERE id=%s
-        '''
-        cursor.execute(query_kat,(sınıf_id,))
-        kat=cursor.fetchone()
-        if kat:
-            kat=kat[0]
-            print(f'{isim} isimli öğrenci {kat}. katta.')
-        else:
-            print(f'{isim} isimli öğrencinin sınıfı veri tabanında bulunamadı. ')
+        
+        
     except(Exception,psy.Error) as error:
         print(f'veritabanı oluşturulurken hata oluştu: {error}')
     finally:   
@@ -477,7 +541,9 @@ def switch_case(case) :
         '3':delete_case,
         '4':list_case,
         '5':filter_by_class_and_birth,
-        '6':find_student_floor
+        '6':find_student_floor,
+        '7': lambda: insertTable('hobi', (input('Hobi ismi: '),)),
+        '8': add_hobbies_to_student
         
         
     }
@@ -492,6 +558,7 @@ def main():
         case=input('Lütfen seçiminiz yapınız: ') 
         func=switch_case(case) 
         func() 
+        
     
                                                
     
